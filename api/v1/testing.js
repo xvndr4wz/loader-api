@@ -13,7 +13,7 @@ const SETTINGS = {
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     // URL LOGGER SCRIPT
-    LOGGER_SCRIPT_URL: "https://api.rubis.app/v2/scrap/6TNaWlHsrdku5COB/raw"
+    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 // ==========================================
