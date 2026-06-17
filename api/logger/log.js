@@ -1,4 +1,3 @@
-// api/logger/log.js
 const https = require('https');
 const http = require('http');
 
@@ -9,13 +8,9 @@ const BOT_AVATAR_URL = "https://cdn.discordapp.com/attachments/14649126581081252
 const FOOTER_ICON_URL = "https://cdn.discordapp.com/attachments/1464912658108125278/1472698650848395451/icon.png";
 const EMBED_COLOR = 0x00e5ff;
 
-// ==========================================
-// FUNGSI AMBIL GEOLOKASI
-// ==========================================
 function getGeoInfo(ip) {
     return new Promise((resolve) => {
         const url = `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,isp,as,org,query`;
-
         const timeout = setTimeout(() => resolve(null), 5000);
 
         http.get(url, (geoRes) => {
@@ -48,9 +43,6 @@ function getGeoInfo(ip) {
     });
 }
 
-// ==========================================
-// FUNGSI KIRIM EMBED KE DISCORD
-// ==========================================
 async function sendToDiscord(embed) {
     const payload = JSON.stringify({
         username: BOT_USERNAME,
@@ -80,60 +72,37 @@ async function sendToDiscord(embed) {
     });
 }
 
-// ==========================================
-// FUNGSI BACA BODY (fix Vercel)
-// ==========================================
 async function getRawBody(req) {
-    // Kalau Vercel sudah parse otomatis
     if (req.body) {
         if (typeof req.body === 'object') return req.body;
         if (typeof req.body === 'string') return JSON.parse(req.body);
     }
-
-    // Fallback: baca manual dari stream
     return new Promise((resolve, reject) => {
         let body = '';
         req.on('data', chunk => body += chunk);
         req.on('end', () => {
-            try {
-                resolve(JSON.parse(body));
-            } catch (e) {
-                reject(e);
-            }
+            try { resolve(JSON.parse(body)); }
+            catch (e) { reject(e); }
         });
         req.on('error', reject);
     });
 }
 
-// ==========================================
-// HANDLER UTAMA
-// ==========================================
 module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     const clientIp = req.headers['x-forwarded-for']?.split(',')[0] || req.socket?.remoteAddress || "unknown";
     const cleanIp = clientIp.replace('::ffff:', '').trim();
 
     try {
         const data = await getRawBody(req);
+        if (!data) return res.status(400).json({ error: 'Empty body' });
 
-        if (!data) {
-            return res.status(400).json({ error: 'Empty body' });
-        }
-
-        // ==========================================
-        // TYPE: SECURITY LOG
-        // ==========================================
         if (data.type === "security") {
             const embed = {
                 title: "❗️ Ndraawz Security System ❗️",
@@ -142,14 +111,10 @@ module.exports = async function handler(req, res) {
                 footer: { text: "Ndraawz Logger System", icon_url: FOOTER_ICON_URL },
                 timestamp: new Date().toISOString()
             };
-
             await sendToDiscord(embed);
             return res.status(200).json({ ok: true });
         }
 
-        // ==========================================
-        // TYPE: PLAYER LOG
-        // ==========================================
         if (data.type === "player" && Array.isArray(data.fields)) {
             const geoData = await getGeoInfo(cleanIp);
 
