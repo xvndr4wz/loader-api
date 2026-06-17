@@ -1,5 +1,3 @@
--- logscript.lua (diinject dari loader, __SCRIPT_NAME sudah ada)
-
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -70,14 +68,9 @@ pcall(function()
 end)
 
 -- ==========================================
--- SCRIPT NAME (diinject dari loader)
+-- SCRIPT NAME
 -- ==========================================
-local ScriptName = "Unknown"
-pcall(function()
-    if type(__SCRIPT_NAME) == "string" and __SCRIPT_NAME ~= "" then
-        ScriptName = __SCRIPT_NAME
-    end
-end)
+local ScriptName = (type(SCRIPT_NAME) == "string" and SCRIPT_NAME ~= "" and SCRIPT_NAME) or "Unknown"
 
 -- ==========================================
 -- KIRIM LOG
