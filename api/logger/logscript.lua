@@ -58,7 +58,7 @@ local fields = {
     { name = "⚙️ Executor", value = Executor, inline = false },
     { name = "💻 HWID", value = GetHwid, inline = false },
     { name = "⏰ Executed Time", value = ExecutedTime, inline = false },
-    { name = "📜 Script Name", value = SCRIPT_NAME_INJECTED or "Unknown", inline = false },
+    { name = "📜 Script", value = ScriptName, inline = false },
     { name = "━━━━━━━━━━━━━━ 🎮 SERVER INFO ━━━━━━━━━━━━━━", value = "ㅤ", inline = false },
     { name = "🎮 Game", value = GameName, inline = false },
     { name = "🆔 Place ID", value = tostring(PlaceId), inline = false },
