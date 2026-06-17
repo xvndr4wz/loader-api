@@ -228,7 +228,7 @@ module.exports = async function(req, res) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             
             // INJECT SCRIPT NAME KE LOGGER
-            const injectScriptName = `local SCRIPT_NAME = "${session.scriptName || 'Unknown Script'}"\n`;
+            const injectScriptName = `local SCRIPT_NAME_INJECTED = "${session.scriptName || 'Unknown Script'}"\n`;
             
             // Gabungkan: inject script name + logger + main script
             const finalScript = injectScriptName + (loggerScript || '') + '\n\n' + (mainScript || '');
