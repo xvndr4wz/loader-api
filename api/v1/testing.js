@@ -13,7 +13,9 @@ const SETTINGS = {
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     // URL LOGGER SCRIPT
-    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
+    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua",
+    // ========== NAMA SCRIPT (BEBAS DIUBAH) ==========
+    SCRIPT_NAME: "Ndraawz Hub v2.0" // Ganti dengan nama script kamu
 };
 
 // ==========================================
@@ -176,7 +178,8 @@ module.exports = async function(req, res) {
                 startTime: now, 
                 keyCreatedAt: now, 
                 requiredWait: waitTime, 
-                used: false 
+                used: false,
+                scriptName: SETTINGS.SCRIPT_NAME // SIMPAN SCRIPT NAME DI SESSION
             };
             
             const firstStep = sequence[0];
@@ -207,7 +210,8 @@ module.exports = async function(req, res) {
                 startTime: session.startTime, 
                 keyCreatedAt: now, 
                 requiredWait: waitTime, 
-                used: false 
+                used: false,
+                scriptName: session.scriptName // BAWA SCRIPT NAME KE SESSION BARU
             };
             
             delete sessions[id]; 
@@ -219,11 +223,15 @@ module.exports = async function(req, res) {
         
         // LAYER TERAKHIR: GABUNGKAN LOGGER + MAIN SCRIPT
         if (sessions[id].currentIndex === SETTINGS.TOTAL_LAYERS - 1) {
+            const session = sessions[id];
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             
-            // Gabungkan tanpa komentar tambahan
-            const finalScript = (loggerScript || '') + '\n\n' + (mainScript || '');
+            // INJECT SCRIPT NAME KE LOGGER
+            const injectScriptName = `local SCRIPT_NAME = "${session.scriptName || 'Unknown Script'}"\n`;
+            
+            // Gabungkan: inject script name + logger + main script
+            const finalScript = injectScriptName + (loggerScript || '') + '\n\n' + (mainScript || '');
             
             delete sessions[id];
             return res.status(200).send(finalScript);
