@@ -1,29 +1,20 @@
 const https = require('https');
 
-// ============================
-// SETTINGS — edit bagian ini tiap buat loader baru
-// ============================
 const SETTINGS = {
     TOTAL_LAYERS: 5,
     MIN_WAIT: 112,
     MAX_WAIT: 119,
     SESSION_EXPIRY: 10000,
     KEY_LIFETIME: 5000,
-    SCRIPT_NAME: "NDRAAWZOMTOO",  // ← ganti ini tiap loader
+    SCRIPT_NAME: "NamaScriptMu",        // ← ganti ini tiap buat loader baru
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
-    REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
+    REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",   // ← ganti ini tiap buat loader baru
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
-// ==========================================
-// MEMORY STORAGE
-// ==========================================
 let sessions = {};
 let blacklist = {};
 
-// ==========================================
-// HELPER FETCH
-// ==========================================
 function fetchRaw(url) {
     return new Promise((resolve) => {
         https.get(url, (res) => {
@@ -34,17 +25,11 @@ function fetchRaw(url) {
     });
 }
 
-// ==========================================
-// RANDOM ERROR CODE
-// ==========================================
 function getRandomError() {
     const errorCodes = [400, 401, 403, 404, 500, 502, 503];
     return errorCodes[Math.floor(Math.random() * errorCodes.length)];
 }
 
-// ==========================================
-// KIRIM SECURITY LOG
-// ==========================================
 async function sendSecurityLog(message, ip, type) {
     const data = JSON.stringify({
         type: "security",
@@ -70,9 +55,6 @@ async function sendSecurityLog(message, ip, type) {
     });
 }
 
-// ==========================================
-// MAIN HANDLER
-// ==========================================
 module.exports = async function(req, res) {
     res.setHeader('Content-Type', 'text/plain');
 
@@ -93,17 +75,14 @@ module.exports = async function(req, res) {
     const urlParts = req.url.split('?');
     const queryString = urlParts[1] || "";
     const params = queryString.split('.');
-
     const step = params[0];
     const id = params[1];
     const key = params[2];
-
     const currentStep = parseInt(step) || 0;
     const host = req.headers.host;
     const currentPath = urlParts[0];
 
     try {
-        // Validasi handshake untuk step > 0
         if (currentStep > 0) {
             const session = sessions[id];
 
@@ -148,12 +127,10 @@ module.exports = async function(req, res) {
             session.used = true;
         }
 
-        // Step 0 — inisialisasi sesi
         if (currentStep === 0) {
             const ipPart = cleanIp.split('.').pop() || "0";
             const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
             const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-
             const nextKey = Math.random().toString(36).substring(2, 8);
             const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
 
@@ -181,7 +158,6 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
 
-        // Middle layers — rotasi session
         if (sessions[id].currentIndex < SETTINGS.TOTAL_LAYERS - 1) {
             const session = sessions[id];
             session.currentIndex++;
@@ -189,7 +165,6 @@ module.exports = async function(req, res) {
             const ipPart = cleanIp.split('.').pop() || "0";
             const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
             const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-
             const nextStepNumber = session.stepSequence[session.currentIndex];
             const nextKey = Math.random().toString(36).substring(2, 8);
             const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
@@ -218,8 +193,7 @@ module.exports = async function(req, res) {
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
 
-            // Inject script name di paling atas
-            const injectedName = `local __SCRIPT_NAME = "${SETTINGS.SCRIPT_NAME}"\n`;
+            const injectedName = `local SCRIPT_NAME = "${SETTINGS.SCRIPT_NAME}"\n`;
             const finalScript = injectedName + (loggerScript || '') + '\n\n' + (mainScript || '');
 
             delete sessions[id];
