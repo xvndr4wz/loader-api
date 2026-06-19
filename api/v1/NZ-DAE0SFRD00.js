@@ -97,44 +97,6 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== VALIDASI HANDSHAKE ==========
-        if (currentStep > 0) {
-            const session = sessions[id];
-            
-            if (!session || session.ownerIP !== cleanIp) {
-                const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
-                return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
-            }
-            
-            const expectedStep = session.stepSequence[session.currentIndex];
-            if (currentStep !== expectedStep) {
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            if (session.used === true) {
-                blacklist[cleanIp] = true;
-                await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            if (session.nextKey !== key) {
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            const timeSinceLastRequest = now - session.lastTime;
-            if (timeSinceLastRequest < session.requiredWait) {
-                blacklist[cleanIp] = true;
-                delete sessions[id];
-                await sendSecurityLogToLogJs("🚫 **DETECT BOT** - Timing violation", cleanIp, "bot_detect");
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-
-            session.used = true;
-        }
-        
         // ========== STEP 0: INIT SESSION ==========
         if (currentStep === 0) {
             let sequence = [];
@@ -143,6 +105,7 @@ module.exports = async function(req, res) {
                 if (!sequence.includes(r)) sequence.push(r);
             }
 
+            // index 0 = layer 1, session dibuat untuk menerima request layer 1
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
             const firstStep = sequence[0];
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
@@ -150,8 +113,43 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
 
+        // ========== VALIDASI HANDSHAKE (step > 0) ==========
         const session = sessions[id];
+
+        if (!session || session.ownerIP !== cleanIp) {
+            const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
+            return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+        }
+
+        const expectedStep = session.stepSequence[session.currentIndex];
+        if (currentStep !== expectedStep) {
+            delete sessions[id];
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        if (session.used === true) {
+            blacklist[cleanIp] = true;
+            await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
+            delete sessions[id];
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        if (session.nextKey !== key) {
+            delete sessions[id];
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        const timeSinceLastRequest = now - session.lastTime;
+        if (timeSinceLastRequest < session.requiredWait) {
+            blacklist[cleanIp] = true;
+            delete sessions[id];
+            await sendSecurityLogToLogJs("🚫 **DETECT BOT** - Timing violation", cleanIp, "bot_detect");
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        // Ambil idx DARI currentIndex session sekarang
         const idx = session.currentIndex;
+        session.used = true;
 
         // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
         if (idx === 5) {
