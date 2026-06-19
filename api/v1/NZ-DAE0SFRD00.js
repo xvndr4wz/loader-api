@@ -153,29 +153,18 @@ module.exports = async function(req, res) {
         const session = sessions[id];
         const idx = session.currentIndex;
 
-        /*
-         * TOTAL_LAYERS = 6, mapping idx:
-         * idx 0 → layer 1 → redirect biasa
-         * idx 1 → layer 2 → redirect biasa
-         * idx 2 → layer 3 → redirect biasa
-         * idx 3 → layer 4 → redirect ke layer 5 (logger)
-         * idx 4 → layer 5 → logger (coroutine) + redirect ke layer 6
-         * idx 5 → layer 6 → main script SAJA ✅
-         */
-
-        // ========== LAYER 6 (idx 5 = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
-        if (idx === SETTINGS.TOTAL_LAYERS - 1) {
+        // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
+        if (idx === 5) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx 4 = TOTAL_LAYERS - 2): LOGGER + REDIRECT KE LAYER 6 ==========
-        if (idx === SETTINGS.TOTAL_LAYERS - 2) {
-            const nextIndex = idx + 1; // = 5
-            const nextStepNumber = session.stepSequence[nextIndex]; // ambil SEBELUM delete
+        // ========== LAYER 5 (idx 4): LOGGER + LOADSTRING KE LAYER 6 ==========
+        if (idx === 4) {
+            const nextStepNumber = session.stepSequence[5];
             const { newSessionID, nextKey, waitTime } = makeSession(
-                session.ownerIP, session.stepSequence, nextIndex
+                session.ownerIP, session.stepSequence, 5
             );
             delete sessions[id];
 
@@ -193,7 +182,7 @@ module.exports = async function(req, res) {
 
         // ========== LAYER 1-4 (idx 0,1,2,3): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
-        const nextStepNumber = session.stepSequence[nextIndex]; // ambil SEBELUM delete
+        const nextStepNumber = session.stepSequence[nextIndex];
         const { newSessionID, nextKey, waitTime } = makeSession(
             session.ownerIP, session.stepSequence, nextIndex
         );
