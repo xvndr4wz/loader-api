@@ -4,8 +4,6 @@ const SETTINGS = {
     TOTAL_LAYERS: 6,
     MIN_WAIT: 112, 
     MAX_WAIT: 119, 
-    SESSION_EXPIRY: 15000, 
-    KEY_LIFETIME: 8000,   
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/scripts/NdraawzHubBF.lua",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
@@ -50,7 +48,7 @@ async function sendSecurityLogToLogJs(message, ip, type) {
     });
 }
 
-function makeSession(ownerIp, stepSequence, currentIndex, startTime) {
+function makeSession(ownerIp, stepSequence, currentIndex) {
     const now = Date.now();
     const newSessionID = Math.random().toString(36).substring(2, 6).padEnd(4, 'x');
     const nextKey = Math.random().toString(36).substring(2, 8);
@@ -62,10 +60,8 @@ function makeSession(ownerIp, stepSequence, currentIndex, startTime) {
         currentIndex: currentIndex,
         nextKey: nextKey,
         lastTime: now,
-        startTime: startTime || now,
-        keyCreatedAt: now,
         requiredWait: waitTime,
-        used: false
+        used: false  // langsung expired begitu used = true dan session didelete
     };
 
     return { newSessionID, nextKey, waitTime };
@@ -116,16 +112,10 @@ module.exports = async function(req, res) {
                 return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
             }
             
+            // Replay attack: session sudah dipakai
             if (session.used === true) {
                 blacklist[cleanIp] = true;
                 await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            const sessionDuration = now - session.startTime;
-            const keyDuration = now - session.keyCreatedAt;
-            if (sessionDuration > SETTINGS.SESSION_EXPIRY || keyDuration > SETTINGS.KEY_LIFETIME) {
                 delete sessions[id];
                 return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
             }
@@ -143,6 +133,7 @@ module.exports = async function(req, res) {
                 return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
             }
 
+            // Tandai used, session akan didelete di handler masing-masing layer
             session.used = true;
         }
         
@@ -181,11 +172,11 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER DI COROUTINE + LOADSTRING KE LAYER 6 ==========
+        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER COROUTINE + LOADSTRING KE LAYER 6 ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
             const nextIndex = idx + 1;
             const { newSessionID, nextKey, waitTime } = makeSession(
-                session.ownerIP, session.stepSequence, nextIndex, session.startTime
+                session.ownerIP, session.stepSequence, nextIndex
             );
             delete sessions[id];
 
@@ -193,7 +184,6 @@ module.exports = async function(req, res) {
             const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
 
-            // Logger jalan di coroutine terpisah supaya tidak conflict dengan main script
             const luaScript = "coroutine.wrap(function()\n" +
                               (loggerScript || '') + "\n" +
                               "end)()\n" +
@@ -206,7 +196,7 @@ module.exports = async function(req, res) {
         // ========== LAYER 1-4 (idx 0,1,2,3): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const { newSessionID, nextKey, waitTime } = makeSession(
-            session.ownerIP, session.stepSequence, nextIndex, session.startTime
+            session.ownerIP, session.stepSequence, nextIndex
         );
         delete sessions[id];
 
