@@ -7,8 +7,8 @@ const SETTINGS = {
     SESSION_EXPIRY: 10000, 
     KEY_LIFETIME: 5000,   
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
-    REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
-    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/scripts/NdraawzHubBF.lua"
+    REAL_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/scripts/NdraawzHubBF.lua",
+    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 let sessions = {}; 
