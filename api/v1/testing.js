@@ -3,13 +3,14 @@ const https = require('https');
 const SETTINGS = {
     TOTAL_LAYERS: 5,
     RATE_LIMIT_MS: 10000,
+    RATE_LIMIT_MAX: 3,
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 let sessions = {}; 
-let rateLimits = {};
+let rateLimits = {}; // { ip: { count, firstRequestAt } }
 
 function fetchRaw(url) {
     return new Promise((resolve) => {
@@ -79,7 +80,7 @@ setInterval(() => {
         if (now - sessions[id].lastTime > 300000) delete sessions[id];
     }
     for (const ip in rateLimits) {
-        if (now - rateLimits[ip] > SETTINGS.RATE_LIMIT_MS) delete rateLimits[ip];
+        if (now - rateLimits[ip].firstRequestAt > SETTINGS.RATE_LIMIT_MS) delete rateLimits[ip];
     }
 }, 300000);
 
@@ -115,20 +116,36 @@ module.exports = async function(req, res) {
     try {
         // ========== STEP 0: RATE LIMIT + INIT SESSION ==========
         if (currentStep === 0) {
-            const lastRequest = rateLimits[cleanIp];
+            const rateData = rateLimits[cleanIp];
 
-            if (lastRequest && (now - lastRequest) < SETTINGS.RATE_LIMIT_MS) {
-                // Kirim log ke Discord, tapi tetap boleh lanjut
-                await sendSecurityLogToLogJs(
-                    `⚠️ **SPAM DETECT** - Request terlalu cepat dari IP ini`,
-                    cleanIp,
-                    "spam_detect"
-                );
-                const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
-                return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+            if (rateData) {
+                const elapsed = now - rateData.firstRequestAt;
+                const sisaCooldown = Math.ceil((SETTINGS.RATE_LIMIT_MS - elapsed) / 1000);
+
+                if (elapsed < SETTINGS.RATE_LIMIT_MS) {
+                    rateData.count++;
+
+                    if (rateData.count > SETTINGS.RATE_LIMIT_MAX) {
+                        // Sudah melebihi batas, kirim log
+                        await sendSecurityLogToLogJs(
+                            `🚨 **SPAM DETECTED**\n` +
+                            `📡 **IP:** \`${cleanIp}\`\n` +
+                            `🔢 **Load ke:** ${rateData.count}x (maks ${SETTINGS.RATE_LIMIT_MAX}x per ${SETTINGS.RATE_LIMIT_MS / 1000} detik)\n` +
+                            `⏳ **Sisa cooldown:** ${sisaCooldown} detik lagi`,
+                            cleanIp,
+                            "spam_detect"
+                        );
+                        const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
+                        return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+                    }
+                } else {
+                    // Reset karena sudah lewat cooldown
+                    rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
+                }
+            } else {
+                // Request pertama
+                rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
             }
-
-            rateLimits[cleanIp] = now;
 
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
@@ -157,7 +174,9 @@ module.exports = async function(req, res) {
 
         if (session.used === true) {
             await sendSecurityLogToLogJs(
-                "🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati",
+                `🚫 **REPLAY ATTACK DETECTED**\n` +
+                `📡 **IP:** \`${cleanIp}\`\n` +
+                `⚠️ Mencoba mengakses link yang sudah mati`,
                 cleanIp,
                 "replay_attack"
             );
