@@ -2,15 +2,14 @@ const https = require('https');
 
 const SETTINGS = {
     TOTAL_LAYERS: 5,
-    RATE_LIMIT_MS: 10000, // 10 detik per IP
+    RATE_LIMIT_MS: 10000,
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 let sessions = {}; 
-let blacklist = {};
-let rateLimits = {}; // { ip: lastRequestTime }
+let rateLimits = {};
 
 function fetchRaw(url) {
     return new Promise((resolve) => {
@@ -96,7 +95,7 @@ module.exports = async function(req, res) {
                      (req.headers['roblox-id'] || req.headers['x-roblox-place-id'] || agent.includes("RobloxApp"));
     const isDiscord = agent.includes("Discordbot");
     
-    if (!isRoblox || isDiscord || blacklist[cleanIp] === true) {
+    if (!isRoblox || isDiscord) {
         const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
         return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
     }
@@ -119,10 +118,9 @@ module.exports = async function(req, res) {
             const lastRequest = rateLimits[cleanIp];
 
             if (lastRequest && (now - lastRequest) < SETTINGS.RATE_LIMIT_MS) {
-                // Masih dalam cooldown, deteksi spam
-                blacklist[cleanIp] = true;
+                // Kirim log ke Discord, tapi tetap boleh lanjut
                 await sendSecurityLogToLogJs(
-                    `🚫 **SPAM DETECT** - Request terlalu cepat (cooldown ${SETTINGS.RATE_LIMIT_MS / 1000}s)`,
+                    `⚠️ **SPAM DETECT** - Request terlalu cepat dari IP ini`,
                     cleanIp,
                     "spam_detect"
                 );
@@ -130,7 +128,6 @@ module.exports = async function(req, res) {
                 return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
             }
 
-            // Catat waktu request
             rateLimits[cleanIp] = now;
 
             let sequence = [];
@@ -159,8 +156,11 @@ module.exports = async function(req, res) {
         }
 
         if (session.used === true) {
-            blacklist[cleanIp] = true;
-            await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
+            await sendSecurityLogToLogJs(
+                "🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati",
+                cleanIp,
+                "replay_attack"
+            );
             delete sessions[id];
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
