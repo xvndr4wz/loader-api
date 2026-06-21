@@ -2,15 +2,16 @@ const https = require('https');
 
 const SETTINGS = {
     TOTAL_LAYERS: 5,
-    MIN_WAIT: 112, 
-    MAX_WAIT: 119, 
+    RATE_LIMIT_MS: 10000,
+    RATE_LIMIT_MAX: 3,
+    SESSION_TTL: 10000,
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/scripts/NdraawzHubBF.lua",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 let sessions = {}; 
-let blacklist = {}; 
+let rateLimits = {};
 
 function fetchRaw(url) {
     return new Promise((resolve) => {
@@ -35,9 +36,15 @@ async function sendSecurityLogToLogJs(message, ip, type) {
         ip: ip
     });
     return new Promise((resolve) => {
-        const req = https.request('https://api-ndraawz.vercel.app/api/logger/log', {
+        const url = new URL('https://api-ndraawz.vercel.app/api/logger/log');
+        const req = https.request({
+            hostname: url.hostname,
+            path: url.pathname,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data)
+            }
         }, (res) => {
             res.resume();
             resolve(true);
@@ -47,6 +54,100 @@ async function sendSecurityLogToLogJs(message, ip, type) {
         req.end();
     });
 }
+
+function obfuscateUrl(url) {
+    // Pastikan URL hanya mengandung karakter aman
+    const safeUrl = url.trim();
+
+    // Split jadi potongan 2-4 karakter
+    const parts = [];
+    let i = 0;
+    while (i < safeUrl.length) {
+        const len = Math.floor(Math.random() * 3) + 2;
+        parts.push(safeUrl.substring(i, i + len));
+        i += len;
+    }
+
+    // Shuffle index
+    const indices = [...Array(parts.length).keys()];
+    for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+
+    // Array isi acak berdasarkan shuffle
+    const shuffledParts = indices.map(i => parts[i]);
+
+    // Escape semua karakter berbahaya
+    const arrayStr = shuffledParts.map(p => {
+        const escaped = p
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\0/g, '\\0');
+        return `'${escaped}'`;
+    }).join(',');
+
+    // Mapping posisi asli ke posisi shuffled
+    const orderMap = new Array(parts.length);
+    indices.forEach((originalIdx, shuffledIdx) => {
+        orderMap[originalIdx] = shuffledIdx + 1;
+    });
+
+    // Nama variabel acak 2-3 huruf hindari keyword lua
+    const luaKeywords = ['do','if','in','or','and','end','for','nil','not','repeat','then','true','false','local','while','break','else','elseif','function','return','until'];
+    const chars = 'abcdefghijklmnopqrstuvwxyz';
+    let varName = '';
+    do {
+        varName = '';
+        const varLen = Math.floor(Math.random() * 2) + 2;
+        for (let i = 0; i < varLen; i++) {
+            varName += chars[Math.floor(Math.random() * chars.length)];
+        }
+    } while (luaKeywords.includes(varName));
+
+    // Concat acak
+    const concatStr = orderMap.map(i => `${varName}[${i}]`).join('..');
+
+    return `local ${varName}={${arrayStr}}loadstring(game:HttpGet(${concatStr}))()`;
+}
+
+function makeSession(ownerIp, stepSequence, currentIndex) {
+    const now = Date.now();
+    const ipPart = ownerIp.split('.').pop() || "0";
+    const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
+    const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
+    const nextKey = Math.random().toString(36).substring(2, 8);
+
+    sessions[newSessionID] = {
+        ownerIP: ownerIp,
+        stepSequence: stepSequence,
+        currentIndex: currentIndex,
+        nextKey: nextKey,
+        lastTime: now,
+        used: false
+    };
+
+    return { newSessionID, nextKey };
+}
+
+function expireSession(id) {
+    if (sessions[id]) {
+        sessions[id].used = true;
+        setTimeout(() => delete sessions[id], SETTINGS.SESSION_TTL);
+    }
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const id in sessions) {
+        if (now - sessions[id].lastTime > 300000) delete sessions[id];
+    }
+    for (const ip in rateLimits) {
+        if (now - rateLimits[ip].firstRequestAt > SETTINGS.RATE_LIMIT_MS) delete rateLimits[ip];
+    }
+}, 300000);
 
 module.exports = async function(req, res) {
     res.setHeader('Content-Type', 'text/plain');
@@ -60,7 +161,7 @@ module.exports = async function(req, res) {
                      (req.headers['roblox-id'] || req.headers['x-roblox-place-id'] || agent.includes("RobloxApp"));
     const isDiscord = agent.includes("Discordbot");
     
-    if (!isRoblox || isDiscord || blacklist[cleanIp] === true) {
+    if (!isRoblox || isDiscord) {
         const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
         return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
     }
@@ -78,140 +179,118 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== VALIDASI HANDSHAKE ==========
-        if (currentStep > 0) {
-            const session = sessions[id];
-            
-            if (!session || session.ownerIP !== cleanIp) {
-                const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
-                return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
-            }
-            
-            const expectedStep = session.stepSequence[session.currentIndex];
-            if (currentStep !== expectedStep) {
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            // Replay attack: session sudah dipakai langsung banned
-            if (session.used === true) {
-                blacklist[cleanIp] = true;
-                await sendSecurityLogToLogJs("🚫 **REPLAY ATTACK** - Mencoba akses ulang link mati", cleanIp, "replay_attack");
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            if (session.nextKey !== key) {
-                delete sessions[id];
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
-            }
-            
-            const timeSinceLastRequest = now - session.lastTime;
-            if (timeSinceLastRequest < session.requiredWait) {
-                blacklist[cleanIp] = true;
-                delete sessions[id];
-                await sendSecurityLogToLogJs("🚫 **DETECT BOT** - Timing violation", cleanIp, "bot_detect");
-                return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        // ========== STEP 0: RATE LIMIT + INIT SESSION ==========
+        if (currentStep === 0) {
+            const rateData = rateLimits[cleanIp];
+
+            if (rateData) {
+                const elapsed = now - rateData.firstRequestAt;
+                const sisaCooldown = Math.ceil((SETTINGS.RATE_LIMIT_MS - elapsed) / 1000);
+
+                if (elapsed < SETTINGS.RATE_LIMIT_MS) {
+                    rateData.count++;
+                    if (rateData.count > SETTINGS.RATE_LIMIT_MAX) {
+                        await sendSecurityLogToLogJs(
+                            `🚨 **SPAM DETECTED**\n` +
+                            `📡 **IP:** \`${cleanIp}\`\n` +
+                            `🔢 **Load ke:** ${rateData.count}x (maks ${SETTINGS.RATE_LIMIT_MAX}x per ${SETTINGS.RATE_LIMIT_MS / 1000} detik)\n` +
+                            `⏳ **Sisa cooldown:** ${sisaCooldown} detik lagi`,
+                            cleanIp,
+                            "spam_detect"
+                        );
+                        const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
+                        return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+                    }
+                } else {
+                    rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
+                }
+            } else {
+                rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
             }
 
-            // Tandai used — session ini sudah tidak bisa dipakai lagi
-            session.used = true;
-        }
-        
-        // ========== STEP 0: INIT SESSION ==========
-        if (currentStep === 0) {
-            const ipPart = cleanIp.split('.').pop() || "0";
-            const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
-            const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-            const nextKey = Math.random().toString(36).substring(2, 8);
-            const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
-            
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
                 let r = Math.floor(Math.random() * 300) + 1;
                 if (!sequence.includes(r)) sequence.push(r);
             }
-            
-            sessions[newSessionID] = { 
-                ownerIP: cleanIp, 
-                stepSequence: sequence,
-                currentIndex: 0,
-                nextKey: nextKey, 
-                lastTime: now, 
-                requiredWait: waitTime, 
-                used: false 
-            };
-            
+
+            const { newSessionID, nextKey } = makeSession(cleanIp, sequence, 0);
             const nextUrl = "https://" + host + currentPath + "?" + sequence[0] + "." + newSessionID + "." + nextKey;
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-            return res.status(200).send(luaScript);
+            return res.status(200).send(obfuscateUrl(nextUrl));
         }
 
+        // ========== VALIDASI HANDSHAKE ==========
         const session = sessions[id];
+
+        if (!session || session.ownerIP !== cleanIp) {
+            const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
+            return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+        }
+
+        if (currentStep !== session.stepSequence[session.currentIndex]) {
+            expireSession(id);
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        // ========== CEK REPLAY ATTACK ==========
+        if (session.used === true) {
+            await sendSecurityLogToLogJs(
+                `🚫 **REPLAY ATTACK DETECTED**\n` +
+                `📡 **IP:** \`${cleanIp}\`\n` +
+                `🔑 **Key:** \`${key}\`\n` +
+                `🆔 **Session ID:** \`${id}\`\n` +
+                `⚠️ Mencoba mengakses link yang sudah mati`,
+                cleanIp,
+                "replay_attack"
+            );
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
+        // ========== CEK INVALID KEY ==========
+        if (session.nextKey !== key) {
+            await sendSecurityLogToLogJs(
+                `🔑 **INVALID KEY DETECTED**\n` +
+                `📡 **IP:** \`${cleanIp}\`\n` +
+                `❌ **Key dikirim:** \`${key}\`\n` +
+                `⚠️ Key tidak cocok`,
+                cleanIp,
+                "invalid_key"
+            );
+            expireSession(id);
+            return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
+        }
+
         const idx = session.currentIndex;
 
-        // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
+        // ========== LAYER TERAKHIR: MAIN SCRIPT ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
-            delete sessions[id]; // expired setelah dipakai
+            expireSession(id);
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER SEBELUM TERAKHIR (idx = TOTAL_LAYERS-2): LOGGER + LOADSTRING ==========
+        // ========== LAYER SEBELUM TERAKHIR: LOGGER + LOADSTRING ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
             const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
             const nextStepNumber = session.stepSequence[nextIdx];
-            
-            const ipPart = cleanIp.split('.').pop() || "0";
-            const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
-            const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-            const nextKey = Math.random().toString(36).substring(2, 8);
-            const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
-
-            sessions[newSessionID] = {
-                ownerIP: session.ownerIP,
-                stepSequence: session.stepSequence,
-                currentIndex: nextIdx,
-                nextKey: nextKey,
-                lastTime: now,
-                requiredWait: waitTime,
-                used: false
-            };
-            delete sessions[id]; // expired setelah dipakai
+            const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
+            expireSession(id);
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
 
-            // loadstring paling atas, logger di bawah
-            const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
-                              (loggerScript || '');
+            const luaScript = obfuscateUrl(nextUrl) + "\n" + (loggerScript || '');
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER BIASA (idx 0 sampai TOTAL_LAYERS-3): REDIRECT ==========
+        // ========== LAYER BIASA: REDIRECT ==========
         const nextIdx = idx + 1;
         const nextStepNumber = session.stepSequence[nextIdx];
-
-        const ipPart = cleanIp.split('.').pop() || "0";
-        const seed = parseInt(ipPart) + Math.floor(Math.random() * 10000);
-        const newSessionID = seed.toString(36).substring(0, 4).padEnd(4, 'x');
-        const nextKey = Math.random().toString(36).substring(2, 8);
-        const waitTime = Math.floor(Math.random() * (SETTINGS.MAX_WAIT - SETTINGS.MIN_WAIT)) + SETTINGS.MIN_WAIT;
-
-        sessions[newSessionID] = {
-            ownerIP: session.ownerIP,
-            stepSequence: session.stepSequence,
-            currentIndex: nextIdx,
-            nextKey: nextKey,
-            lastTime: now,
-            requiredWait: waitTime,
-            used: false
-        };
-        delete sessions[id]; // expired setelah dipakai
+        const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
+        expireSession(id);
 
         const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-        const luaScript = "task.wait(" + (waitTime / 1000) + ") loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-        return res.status(200).send(luaScript);
+        return res.status(200).send(obfuscateUrl(nextUrl));
 
     } catch (err) {
         const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
