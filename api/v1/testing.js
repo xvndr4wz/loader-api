@@ -2,13 +2,15 @@ const https = require('https');
 
 const SETTINGS = {
     TOTAL_LAYERS: 5,
+    RATE_LIMIT_MS: 10000, // 10 detik per IP
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
 };
 
 let sessions = {}; 
-let blacklist = {}; 
+let blacklist = {};
+let rateLimits = {}; // { ip: lastRequestTime }
 
 function fetchRaw(url) {
     return new Promise((resolve) => {
@@ -71,6 +73,17 @@ function makeSession(ownerIp, stepSequence, currentIndex) {
     return { newSessionID, nextKey };
 }
 
+// Auto cleanup setiap 5 menit
+setInterval(() => {
+    const now = Date.now();
+    for (const id in sessions) {
+        if (now - sessions[id].lastTime > 300000) delete sessions[id];
+    }
+    for (const ip in rateLimits) {
+        if (now - rateLimits[ip] > SETTINGS.RATE_LIMIT_MS) delete rateLimits[ip];
+    }
+}, 300000);
+
 module.exports = async function(req, res) {
     res.setHeader('Content-Type', 'text/plain');
     
@@ -101,8 +114,25 @@ module.exports = async function(req, res) {
     const currentPath = urlParts[0];
     
     try {
-        // ========== STEP 0: INIT SESSION ==========
+        // ========== STEP 0: RATE LIMIT + INIT SESSION ==========
         if (currentStep === 0) {
+            const lastRequest = rateLimits[cleanIp];
+
+            if (lastRequest && (now - lastRequest) < SETTINGS.RATE_LIMIT_MS) {
+                // Masih dalam cooldown, deteksi spam
+                blacklist[cleanIp] = true;
+                await sendSecurityLogToLogJs(
+                    `🚫 **SPAM DETECT** - Request terlalu cepat (cooldown ${SETTINGS.RATE_LIMIT_MS / 1000}s)`,
+                    cleanIp,
+                    "spam_detect"
+                );
+                const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
+                return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
+            }
+
+            // Catat waktu request
+            rateLimits[cleanIp] = now;
+
             let sequence = [];
             while (sequence.length < SETTINGS.TOTAL_LAYERS) {
                 let r = Math.floor(Math.random() * 300) + 1;
@@ -140,7 +170,6 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
-        // Tandai used → expired setelah ini
         session.used = true;
 
         const idx = session.currentIndex;
@@ -148,7 +177,7 @@ module.exports = async function(req, res) {
         // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
-            delete sessions[id]; // expired
+            delete sessions[id];
             return res.status(200).send(mainScript || '');
         }
 
@@ -157,7 +186,7 @@ module.exports = async function(req, res) {
             const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
             const nextStepNumber = session.stepSequence[nextIdx];
             const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-            delete sessions[id]; // expired
+            delete sessions[id];
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
@@ -167,11 +196,11 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER BIASA (idx 0 sampai TOTAL_LAYERS-3): REDIRECT ==========
+        // ========== LAYER BIASA: REDIRECT ==========
         const nextIdx = idx + 1;
         const nextStepNumber = session.stepSequence[nextIdx];
         const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-        delete sessions[id]; // expired
+        delete sessions[id];
 
         const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
         const luaScript = "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
