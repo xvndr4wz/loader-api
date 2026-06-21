@@ -55,45 +55,59 @@ async function sendSecurityLogToLogJs(message, ip, type) {
     });
 }
 
-function randomVarName() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz';
-    const len = Math.floor(Math.random() * 2) + 1;
-    let name = '';
-    for (let i = 0; i < len; i++) {
-        name += chars[Math.floor(Math.random() * chars.length)];
-    }
-    return name;
-}
-
 function obfuscateUrl(url) {
-    // Split jadi potongan 2-5 karakter
+    // Pastikan URL hanya mengandung karakter aman
+    const safeUrl = url.trim();
+
+    // Split jadi potongan 2-4 karakter
     const parts = [];
     let i = 0;
-    while (i < url.length) {
-        const len = Math.floor(Math.random() * 4) + 2;
-        parts.push(url.substring(i, i + len));
+    while (i < safeUrl.length) {
+        const len = Math.floor(Math.random() * 3) + 2;
+        parts.push(safeUrl.substring(i, i + len));
         i += len;
     }
 
-    // Shuffle index — posisi array super acak
-    const indices = parts.map((_, i) => i);
+    // Shuffle index
+    const indices = [...Array(parts.length).keys()];
     for (let i = indices.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [indices[i], indices[j]] = [indices[j], indices[i]];
     }
 
-    // Isi array berdasarkan urutan shuffle
+    // Array isi acak berdasarkan shuffle
     const shuffledParts = indices.map(i => parts[i]);
-    const arrayStr = shuffledParts.map(p => `'${p.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`).join(',');
 
-    // Mapping index asli ke posisi shuffled
+    // Escape semua karakter berbahaya
+    const arrayStr = shuffledParts.map(p => {
+        const escaped = p
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\0/g, '\\0');
+        return `'${escaped}'`;
+    }).join(',');
+
+    // Mapping posisi asli ke posisi shuffled
     const orderMap = new Array(parts.length);
     indices.forEach((originalIdx, shuffledIdx) => {
         orderMap[originalIdx] = shuffledIdx + 1;
     });
 
-    // Concat string pakai index acak: v[7]..v[2]..v[11] dst
-    const varName = randomVarName();
+    // Nama variabel acak 2-3 huruf hindari keyword lua
+    const luaKeywords = ['do','if','in','or','and','end','for','nil','not','repeat','then','true','false','local','while','break','else','elseif','function','return','until'];
+    const chars = 'abcdefghijklmnopqrstuvwxyz';
+    let varName = '';
+    do {
+        varName = '';
+        const varLen = Math.floor(Math.random() * 2) + 2;
+        for (let i = 0; i < varLen; i++) {
+            varName += chars[Math.floor(Math.random() * chars.length)];
+        }
+    } while (luaKeywords.includes(varName));
+
+    // Concat acak
     const concatStr = orderMap.map(i => `${varName}[${i}]`).join('..');
 
     return `local ${varName}={${arrayStr}}loadstring(game:HttpGet(${concatStr}))()`;
@@ -248,14 +262,14 @@ module.exports = async function(req, res) {
 
         const idx = session.currentIndex;
 
-        // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
+        // ========== LAYER TERAKHIR: MAIN SCRIPT ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             expireSession(id);
             return res.status(200).send(mainScript || '');
         }
 
-        // ========== LAYER SEBELUM TERAKHIR (idx = TOTAL_LAYERS-2): LOGGER + OBFUSCATED LOADSTRING ==========
+        // ========== LAYER SEBELUM TERAKHIR: LOGGER + LOADSTRING ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 2) {
             const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
             const nextStepNumber = session.stepSequence[nextIdx];
@@ -269,7 +283,7 @@ module.exports = async function(req, res) {
             return res.status(200).send(luaScript);
         }
 
-        // ========== LAYER BIASA: REDIRECT OBFUSCATED ==========
+        // ========== LAYER BIASA: REDIRECT ==========
         const nextIdx = idx + 1;
         const nextStepNumber = session.stepSequence[nextIdx];
         const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
