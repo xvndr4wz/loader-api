@@ -36,7 +36,7 @@ async function sendSecurityLogToLogJs(message, ip, type) {
         ip: ip
     });
     return new Promise((resolve) => {
-        const url = new URL('https://api-ndraawz.vercel.app/api/logger/log-ndraawz');
+        const url = new URL('https://api-ndraawz.vercel.app/api/logger/loggeraja');
         const req = https.request({
             hostname: url.hostname,
             path: url.pathname,
