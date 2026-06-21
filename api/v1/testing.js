@@ -10,7 +10,7 @@ const SETTINGS = {
 };
 
 let sessions = {}; 
-let rateLimits = {}; // { ip: { count, firstRequestAt } }
+let rateLimits = {};
 
 function fetchRaw(url) {
     return new Promise((resolve) => {
@@ -73,7 +73,6 @@ function makeSession(ownerIp, stepSequence, currentIndex) {
     return { newSessionID, nextKey };
 }
 
-// Auto cleanup setiap 5 menit
 setInterval(() => {
     const now = Date.now();
     for (const id in sessions) {
@@ -126,7 +125,6 @@ module.exports = async function(req, res) {
                     rateData.count++;
 
                     if (rateData.count > SETTINGS.RATE_LIMIT_MAX) {
-                        // Sudah melebihi batas, kirim log
                         await sendSecurityLogToLogJs(
                             `🚨 **SPAM DETECTED**\n` +
                             `📡 **IP:** \`${cleanIp}\`\n` +
@@ -139,11 +137,9 @@ module.exports = async function(req, res) {
                         return res.status(getRandomError()).send(plainResp || "SECURITY : BANNED ACCESS!");
                     }
                 } else {
-                    // Reset karena sudah lewat cooldown
                     rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
                 }
             } else {
-                // Request pertama
                 rateLimits[cleanIp] = { count: 1, firstRequestAt: now };
             }
 
@@ -172,7 +168,9 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
+        // ========== CEK REPLAY ATTACK ==========
         if (session.used === true) {
+            // kirim log DULU sebelum delete
             await sendSecurityLogToLogJs(
                 `🚫 **REPLAY ATTACK DETECTED**\n` +
                 `📡 **IP:** \`${cleanIp}\`\n` +
