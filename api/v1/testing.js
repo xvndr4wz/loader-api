@@ -4,6 +4,7 @@ const SETTINGS = {
     TOTAL_LAYERS: 5,
     RATE_LIMIT_MS: 10000,
     RATE_LIMIT_MAX: 3,
+    SESSION_TTL: 10000, // session tetap ada 10 detik setelah dipakai
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
@@ -73,6 +74,14 @@ function makeSession(ownerIp, stepSequence, currentIndex) {
     return { newSessionID, nextKey };
 }
 
+function expireSession(id) {
+    if (sessions[id]) {
+        sessions[id].used = true;
+        // hapus setelah SESSION_TTL agar replay attack masih bisa terdeteksi
+        setTimeout(() => delete sessions[id], SETTINGS.SESSION_TTL);
+    }
+}
+
 setInterval(() => {
     const now = Date.now();
     for (const id in sessions) {
@@ -123,7 +132,6 @@ module.exports = async function(req, res) {
 
                 if (elapsed < SETTINGS.RATE_LIMIT_MS) {
                     rateData.count++;
-
                     if (rateData.count > SETTINGS.RATE_LIMIT_MAX) {
                         await sendSecurityLogToLogJs(
                             `🚨 **SPAM DETECTED**\n` +
@@ -164,37 +172,35 @@ module.exports = async function(req, res) {
         }
 
         if (currentStep !== session.stepSequence[session.currentIndex]) {
-            delete sessions[id];
+            expireSession(id);
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
         // ========== CEK REPLAY ATTACK ==========
         if (session.used === true) {
-            // kirim log DULU sebelum delete
             await sendSecurityLogToLogJs(
                 `🚫 **REPLAY ATTACK DETECTED**\n` +
                 `📡 **IP:** \`${cleanIp}\`\n` +
+                `🔑 **Key:** \`${key}\`\n` +
+                `🆔 **Session ID:** \`${id}\`\n` +
                 `⚠️ Mencoba mengakses link yang sudah mati`,
                 cleanIp,
                 "replay_attack"
             );
-            delete sessions[id];
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
         if (session.nextKey !== key) {
-            delete sessions[id];
+            expireSession(id);
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
-
-        session.used = true;
 
         const idx = session.currentIndex;
 
         // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
-            delete sessions[id];
+            expireSession(id); // tandai used, hapus setelah 10 detik
             return res.status(200).send(mainScript || '');
         }
 
@@ -203,7 +209,7 @@ module.exports = async function(req, res) {
             const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
             const nextStepNumber = session.stepSequence[nextIdx];
             const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-            delete sessions[id];
+            expireSession(id); // tandai used, hapus setelah 10 detik
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
@@ -217,7 +223,7 @@ module.exports = async function(req, res) {
         const nextIdx = idx + 1;
         const nextStepNumber = session.stepSequence[nextIdx];
         const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-        delete sessions[id];
+        expireSession(id); // tandai used, hapus setelah 10 detik
 
         const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
         const luaScript = "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
