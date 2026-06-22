@@ -7,7 +7,8 @@ const SETTINGS = {
     SESSION_TTL: 10000,
     PLAIN_TEXT_URL: "https://pastefy.app/cMzbfLvJ/raw",
     REAL_SCRIPT_URL: "https://pastefy.app/CoG7X467/raw",
-    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua"
+    LOGGER_SCRIPT_URL: "https://raw.githubusercontent.com/xvndr4wz/loader-api/refs/heads/main/api/logger/logscript.lua",
+    TRACK_EXECUTE_URL: "https://api-ndraawz.vercel.app/api/executions/track"
 };
 
 let sessions = {}; 
@@ -55,11 +56,34 @@ async function sendSecurityLogToLogJs(message, ip, type) {
     });
 }
 
+async function trackExecution(ip) {
+    const data = JSON.stringify({
+        ip: ip,
+        timestamp: new Date().toISOString()
+    });
+    return new Promise((resolve) => {
+        const url = new URL(SETTINGS.TRACK_EXECUTE_URL);
+        const req = https.request({
+            hostname: url.hostname,
+            path: url.pathname,
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(data)
+            }
+        }, (res) => {
+            res.resume();
+            resolve(true);
+        });
+        req.on('error', () => resolve(false));
+        req.write(data);
+        req.end();
+    });
+}
+
 function obfuscateUrl(url) {
-    // Pastikan URL hanya mengandung karakter aman
     const safeUrl = url.trim();
 
-    // Split jadi potongan 2-4 karakter
     const parts = [];
     let i = 0;
     while (i < safeUrl.length) {
@@ -68,17 +92,14 @@ function obfuscateUrl(url) {
         i += len;
     }
 
-    // Shuffle index
     const indices = [...Array(parts.length).keys()];
     for (let i = indices.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [indices[i], indices[j]] = [indices[j], indices[i]];
     }
 
-    // Array isi acak berdasarkan shuffle
     const shuffledParts = indices.map(i => parts[i]);
 
-    // Escape semua karakter berbahaya
     const arrayStr = shuffledParts.map(p => {
         const escaped = p
             .replace(/\\/g, '\\\\')
@@ -89,13 +110,11 @@ function obfuscateUrl(url) {
         return `'${escaped}'`;
     }).join(',');
 
-    // Mapping posisi asli ke posisi shuffled
     const orderMap = new Array(parts.length);
     indices.forEach((originalIdx, shuffledIdx) => {
         orderMap[originalIdx] = shuffledIdx + 1;
     });
 
-    // Nama variabel acak 2-3 huruf hindari keyword lua
     const luaKeywords = ['do','if','in','or','and','end','for','nil','not','repeat','then','true','false','local','while','break','else','elseif','function','return','until'];
     const chars = 'abcdefghijklmnopqrstuvwxyz';
     let varName = '';
@@ -107,7 +126,6 @@ function obfuscateUrl(url) {
         }
     } while (luaKeywords.includes(varName));
 
-    // Concat acak
     const concatStr = orderMap.map(i => `${varName}[${i}]`).join('..');
 
     return `local ${varName}={${arrayStr}}loadstring(game:HttpGet(${concatStr}))()`;
@@ -262,10 +280,14 @@ module.exports = async function(req, res) {
 
         const idx = session.currentIndex;
 
-        // ========== LAYER TERAKHIR: MAIN SCRIPT ==========
+        // ========== LAYER TERAKHIR: MAIN SCRIPT + TRACK EXECUTION ==========
         if (idx === SETTINGS.TOTAL_LAYERS - 1) {
             const mainScript = await fetchRaw(SETTINGS.REAL_SCRIPT_URL);
             expireSession(id);
+
+            // Track execution async
+            trackExecution(cleanIp);
+
             return res.status(200).send(mainScript || '');
         }
 
