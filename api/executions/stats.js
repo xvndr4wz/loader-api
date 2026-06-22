@@ -1,18 +1,21 @@
+import fs from 'fs';
+import path from 'path';
+
 export default async function handler(req, res) {
     res.setHeader('Content-Type', 'application/json');
 
     try {
-        const fs = require('fs');
-        const path = require('path');
         const filePath = path.join(process.cwd(), 'executions.json');
 
         let data = { totalExecutions: 0, lastUpdated: null };
-        if (fs.existsSync(filePath)) {
+        
+        try {
             const content = fs.readFileSync(filePath, 'utf8');
             data = JSON.parse(content);
+        } catch (e) {
+            // File tidak ada
         }
 
-        // Convert ke WIB
         const lastUpdatedDate = new Date(data.lastUpdated || new Date());
         const wibTime = new Date(lastUpdatedDate.getTime() + (7 * 60 * 60 * 1000));
 
@@ -40,6 +43,7 @@ export default async function handler(req, res) {
             fullDate: dateStr
         });
     } catch (err) {
+        console.error('Stats error:', err);
         return res.status(500).json({ error: err.message });
     }
-                                         }
+                                                                 }
