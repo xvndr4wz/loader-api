@@ -2,6 +2,23 @@ export default async function handler(req, res) {
     const API_KEY = "NdraawzOnTop";
     const authHeader = req.headers['authorization'];
 
+    // Function format angka
+    function formatNumber(num) {
+        if (num >= 1000000000000) { // Triliun
+            return (num / 1000000000000).toFixed(3).replace(/\.?0+$/, '') + 'T';
+        }
+        if (num >= 1000000000) { // Miliar
+            return (num / 1000000000).toFixed(3).replace(/\.?0+$/, '') + 'B';
+        }
+        if (num >= 1000000) { // Juta
+            return (num / 1000000).toFixed(3).replace(/\.?0+$/, '') + 'M';
+        }
+        if (num >= 1000) { // Ribu
+            return (num / 1000).toFixed(3).replace(/\.?0+$/, '') + 'K';
+        }
+        return num.toString();
+    }
+
     try {
         // GET: bisa tanpa auth (hanya baca)
         if (req.method === 'GET') {
@@ -47,7 +64,8 @@ export default async function handler(req, res) {
             }
 
             return res.status(200).json({
-                totalExecute: global.execCount || 0,
+                totalExecute: formatNumber(global.execCount || 0),
+                totalExecuteRaw: global.execCount || 0,
                 fullDateTime: formatWIB(wibTime),
                 lastExecute: formatWIB(wibLastTime)
             });
@@ -59,7 +77,6 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
 
-            // Ambil query parameter amount (default 1)
             const amount = parseInt(req.query.amount) || 1;
 
             const kvUrl = process.env.KV_REST_API_URL;
@@ -71,7 +88,8 @@ export default async function handler(req, res) {
                 global.lastUpdate = new Date().toISOString();
                 
                 return res.status(200).json({ 
-                    total: global.execCount,
+                    total: formatNumber(global.execCount),
+                    totalRaw: global.execCount,
                     action: 'incremented',
                     added: amount
                 });
@@ -98,7 +116,8 @@ export default async function handler(req, res) {
             global.lastUpdate = new Date().toISOString();
 
             return res.status(200).json({ 
-                total: count,
+                total: formatNumber(count),
+                totalRaw: count,
                 action: 'incremented',
                 added: amount
             });
@@ -110,7 +129,6 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
 
-            // Ambil query parameter amount (default 1)
             const amount = parseInt(req.query.amount) || 1;
 
             const kvUrl = process.env.KV_REST_API_URL;
@@ -122,7 +140,8 @@ export default async function handler(req, res) {
                 global.lastUpdate = new Date().toISOString();
                 
                 return res.status(200).json({ 
-                    total: global.execCount,
+                    total: formatNumber(global.execCount),
+                    totalRaw: global.execCount,
                     action: 'decremented',
                     removed: amount
                 });
@@ -149,7 +168,8 @@ export default async function handler(req, res) {
             global.lastUpdate = new Date().toISOString();
 
             return res.status(200).json({ 
-                total: count,
+                total: formatNumber(count),
+                totalRaw: count,
                 action: 'decremented',
                 removed: amount
             });
@@ -159,4 +179,4 @@ export default async function handler(req, res) {
     } catch (err) {
         return res.status(500).json({ error: err.message });
     }
-                                                                     }
+                                                      }
