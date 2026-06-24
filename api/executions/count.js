@@ -25,7 +25,6 @@ export default async function handler(req, res) {
                 const hours = String(wibDate.getUTCHours()).padStart(2, '0');
                 const minutes = String(wibDate.getUTCMinutes()).padStart(2, '0');
                 const seconds = String(wibDate.getUTCSeconds()).padStart(2, '0');
-                const milliseconds = String(wibDate.getUTCMilliseconds()).padStart(3, '0');
                 
                 const day = wibDate.getUTCDate();
                 const month = wibDate.getUTCMonth();
@@ -34,7 +33,7 @@ export default async function handler(req, res) {
                 const monthNames = ['januari', 'februari', 'maret', 'april', 'mei', 'juni',
                                    'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
                 
-                const timeStr = `${hours}:${minutes}:${seconds}.${milliseconds}`;
+                const timeStr = `${hours}.${minutes}.${seconds}`;
                 const hour = wibDate.getUTCHours();
                 let timeOfDay = '';
                 if (hour >= 5 && hour < 11) timeOfDay = 'Pagi';
