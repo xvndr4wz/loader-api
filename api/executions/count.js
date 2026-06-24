@@ -10,25 +10,47 @@ export default async function handler(req, res) {
 
             if (!kvUrl || !kvToken) {
                 if (!global.execCount) global.execCount = 0;
-                return res.status(200).json({ 
-                    total: global.execCount,
-                    lastUpdate: new Date().toISOString()
-                });
+                if (!global.lastUpdate) global.lastUpdate = new Date().toISOString();
             }
 
-            const getRes = await fetch(`${kvUrl}/get/exec_count`, {
-                headers: { 'Authorization': `Bearer ${kvToken}` }
-            });
+            // Convert ke WIB
+            const now = new Date();
+            const wibTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
 
-            let count = 0;
-            if (getRes.ok) {
-                const result = await getRes.json();
-                if (result.result) count = parseInt(result.result);
+            const lastUpdatedDate = new Date(global.lastUpdate || now);
+            const wibLastTime = new Date(lastUpdatedDate.getTime() + (7 * 60 * 60 * 1000));
+
+            // Format waktu
+            function formatWIB(wibDate) {
+                const hours = String(wibDate.getUTCHours()).padStart(2, '0');
+                const minutes = String(wibDate.getUTCMinutes()).padStart(2, '0');
+                const seconds = String(wibDate.getUTCSeconds()).padStart(2, '0');
+                const milliseconds = String(wibDate.getUTCMilliseconds()).padStart(3, '0');
+                
+                const day = wibDate.getUTCDate();
+                const month = wibDate.getUTCMonth();
+                const year = wibDate.getUTCFullYear();
+                
+                const monthNames = ['januari', 'februari', 'maret', 'april', 'mei', 'juni',
+                                   'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
+                
+                const timeStr = `${hours}:${minutes}:${seconds}.${milliseconds}`;
+                const hour = wibDate.getUTCHours();
+                let timeOfDay = '';
+                if (hour >= 5 && hour < 11) timeOfDay = 'Pagi';
+                else if (hour >= 11 && hour < 15) timeOfDay = 'Siang';
+                else if (hour >= 15 && hour < 18) timeOfDay = 'Sore';
+                else timeOfDay = 'Malam';
+                
+                const dateStr = `${day} ${monthNames[month]} ${year}`;
+                
+                return `${dateStr} ${timeStr} (${timeOfDay})`;
             }
 
-            return res.status(200).json({ 
-                total: count,
-                lastUpdate: new Date().toISOString()
+            return res.status(200).json({
+                totalExecute: global.execCount || 0,
+                fullDateTime: formatWIB(wibTime),
+                lastExecute: formatWIB(wibLastTime)
             });
         }
 
@@ -44,9 +66,11 @@ export default async function handler(req, res) {
             if (!kvUrl || !kvToken) {
                 if (!global.execCount) global.execCount = 0;
                 global.execCount += 1;
+                global.lastUpdate = new Date().toISOString();
+                
                 return res.status(200).json({ 
                     total: global.execCount,
-                    lastUpdate: new Date().toISOString()
+                    status: 'updated'
                 });
             }
 
@@ -67,9 +91,12 @@ export default async function handler(req, res) {
                 headers: { 'Authorization': `Bearer ${kvToken}` }
             });
 
+            global.execCount = count;
+            global.lastUpdate = new Date().toISOString();
+
             return res.status(200).json({ 
                 total: count,
-                lastUpdate: new Date().toISOString()
+                status: 'updated'
             });
         }
 
@@ -77,4 +104,4 @@ export default async function handler(req, res) {
     } catch (err) {
         return res.status(500).json({ error: err.message });
     }
-                    }
+                }
