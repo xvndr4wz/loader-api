@@ -53,23 +53,27 @@ export default async function handler(req, res) {
             });
         }
 
-        // POST: perlu auth
+        // POST: perlu auth - NAMBAH
         if (req.method === 'POST') {
             if (authHeader !== `Bearer ${API_KEY}`) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
+
+            // Ambil query parameter amount (default 1)
+            const amount = parseInt(req.query.amount) || 1;
 
             const kvUrl = process.env.KV_REST_API_URL;
             const kvToken = process.env.KV_REST_API_TOKEN;
 
             if (!kvUrl || !kvToken) {
                 if (!global.execCount) global.execCount = 0;
-                global.execCount += 1;
+                global.execCount += amount;
                 global.lastUpdate = new Date().toISOString();
                 
                 return res.status(200).json({ 
                     total: global.execCount,
-                    status: 'updated'
+                    action: 'incremented',
+                    added: amount
                 });
             }
 
@@ -83,7 +87,7 @@ export default async function handler(req, res) {
                 if (result.result) count = parseInt(result.result);
             }
 
-            count += 1;
+            count += amount;
 
             await fetch(`${kvUrl}/set/exec_count/${count}`, {
                 method: 'POST',
@@ -95,7 +99,59 @@ export default async function handler(req, res) {
 
             return res.status(200).json({ 
                 total: count,
-                status: 'updated'
+                action: 'incremented',
+                added: amount
+            });
+        }
+
+        // DELETE: perlu auth - KURANGIN
+        if (req.method === 'DELETE') {
+            if (authHeader !== `Bearer ${API_KEY}`) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            // Ambil query parameter amount (default 1)
+            const amount = parseInt(req.query.amount) || 1;
+
+            const kvUrl = process.env.KV_REST_API_URL;
+            const kvToken = process.env.KV_REST_API_TOKEN;
+
+            if (!kvUrl || !kvToken) {
+                if (!global.execCount) global.execCount = 0;
+                global.execCount = Math.max(0, global.execCount - amount);
+                global.lastUpdate = new Date().toISOString();
+                
+                return res.status(200).json({ 
+                    total: global.execCount,
+                    action: 'decremented',
+                    removed: amount
+                });
+            }
+
+            const getRes = await fetch(`${kvUrl}/get/exec_count`, {
+                headers: { 'Authorization': `Bearer ${kvToken}` }
+            });
+
+            let count = 0;
+            if (getRes.ok) {
+                const result = await getRes.json();
+                if (result.result) count = parseInt(result.result);
+            }
+
+            count = Math.max(0, count - amount);
+
+            await fetch(`${kvUrl}/set/exec_count/${count}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${kvToken}` }
+            });
+
+            global.execCount = count;
+            global.lastUpdate = new Date().toISOString();
+
+            return res.status(200).json({ 
+                total: count,
+                action: 'decremented',
+                removed: amount
             });
         }
 
@@ -103,4 +159,4 @@ export default async function handler(req, res) {
     } catch (err) {
         return res.status(500).json({ error: err.message });
     }
-                }
+                                                                     }
